@@ -40,7 +40,7 @@ private:
     
     // Particles
     std::vector<Particle> particles;
-    std::unique_ptr<ParticleSave[]> particle_buf = nullptr;
+    std::vector<std::vector<ParticleSave>> particle_buf;
 
     bool save;
 
@@ -51,7 +51,8 @@ private:
     void update_global_best();
     double update(Particle& particle);
     void initialize(Real2D center, double radius);
-    double update_parallel(std::span<Particle> particles, double& thread_best_f);
+    double update_thread(std::span<Particle> particles, 
+        double& thread_best_f, Real2D& global_best_position);
 
 public:
     // Constructor
@@ -72,7 +73,7 @@ public:
     // Public methods
     void optimize(int n_iterations);
     void optimize_parallel(int n_iterations);
-    void saveToFile(std::string filename, int n_iterations);
+    void saveToFile(std::string filename);
     // Reset method should take same arguments as constructor 
     // defaulted to the current values
     

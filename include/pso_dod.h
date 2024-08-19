@@ -8,7 +8,6 @@
 #define NUM_THREADS std::thread::hardware_concurrency()
 //  Lets try this Data Oriented Design all the young kids are talking about
 
-
 typedef std::array<double, 2> Real2D;
 
 struct Input {
@@ -147,8 +146,8 @@ void generate_particles(std::span<Input> particles, std::span<BestValue> bests,
     }
 }
 
-int run_dod() {
-    int n_particles = 100000;  // 1 hundred thousand
+int pso_serial(const int n_particles, const int n_iterations, const double w,
+               const double c1, const double c2, Real2D center, double radius) {
     double global_best = std::numeric_limits<double>::max();
     Real2D global_best_position = {0, 0};
     std::unique_ptr<Input[]> particles = std::make_unique<Input[]>(n_particles);
@@ -161,13 +160,10 @@ int run_dod() {
     std::span<Out1> out_span(out.get(), n_particles);
     std::span<BestValue> bests_span(bests.get(), n_particles);
 
-    Real2D center = {50, 50};
-    double radius = 100;
-
     // Initialize particles
-    generate_particles(particles_span, bests_span, 0.5, 1.0, 1.0, center,
+    generate_particles(particles_span, bests_span, w, c1, c2, center,
                        radius);
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < n_iterations; ++i) {
         update(particles_span, out_span);
         update_bestValue(out_span, bests_span);
         global_best =
@@ -178,13 +174,14 @@ int run_dod() {
 }
 
 void thread_run(std::span<Input> particle, std::span<Out1> out,
-                std::span<BestValue> bests, double global_best) {
+                std::span<BestValue> bests) {
     update(particle, out);
     update_bestValue(out, bests);
 }
 
-int run_parallel() {
-    const int n_particles = 100000;  // 1 million
+int pso_parallel(const int n_particles, const int n_iterations, const double w,
+                 const double c1, const double c2, Real2D center, double radius,
+                 double (*objective_function)(Real2D)) {
     double global_best = std::numeric_limits<double>::max();
     Real2D global_best_position = {0, 0};
     std::unique_ptr<Input[]> particles = std::make_unique<Input[]>(n_particles);
@@ -197,21 +194,18 @@ int run_parallel() {
     std::span<Out1> out_span(out.get(), n_particles);
     std::span<BestValue> bests_span(bests.get(), n_particles);
 
-    Real2D center = {50, 50};
-    double radius = 100;
     // Generate particles
-    generate_particles(particles_span, bests_span, 0.5, 1.0, 1.0, center,
+    generate_particles(particles_span, bests_span, w, c1, c2, center,
                        radius);
-
 
     // Initialize thread pool
     thread::ThreadPool<void(std::span<Input>, std::span<Out1>,
-                            std::span<BestValue>, double)>
+                            std::span<BestValue>)>
         pool_update(thread_run);
     thread::ThreadPool<void(std::span<Input>, std::span<Out1>, Real2D)> pool(
         update_random_and_out);
     // Split spans into chunks
-    for (int it = 0; it < 100; ++it) {
+    for (int it = 0; it < n_iterations; ++it) {
         for (int t = 0; t < NUM_THREADS; t++) {
             int start = t * n_particles / NUM_THREADS;
             int end = (t + 1) * n_particles / NUM_THREADS;
@@ -223,8 +217,7 @@ int run_parallel() {
             std::span<Out1> out_chunk = out_span.subspan(start, end - start);
             std::span<BestValue> bests_chunk =
                 bests_span.subspan(start, end - start);
-            pool_update.addjob(particles_chunk, out_chunk, bests_chunk,
-                               global_best);
+            pool_update.addjob(particles_chunk, out_chunk, bests_chunk);
         }
         pool_update.wait();
         global_best =

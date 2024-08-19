@@ -31,12 +31,12 @@ double ackley(Real2D x) {
 int main() {
 // // Initialize PSO
 #ifndef DOD_TEST
-    PSO pso(100000, 0.5, 1.0, 1.0, rastrigin, {50, 50}, 100, true);
+    PSO pso(1000000, 0.5, 1.0, 1.0, rastrigin, {250, 250}, 100, false);
 
-    // Optimize
-    // Start clock to meausre time
+    // // Optimize
+    // // Start clock to meausre time
     // auto start = std::chrono::high_resolution_clock::now();
-    // // pso.optimize(100);
+    // pso.optimize(100);
     // auto end = std::chrono::high_resolution_clock::now();
     // std::chrono::duration<double> elapsed = end - start;
     // std::cout << "Elapsed time serial: " << elapsed.count() << "s\n";
@@ -47,24 +47,24 @@ int main() {
     std::chrono::duration<double> elapsed1 = end1 - start1;
     std::cout << "Elapsed time parallel: " << elapsed1.count() << "s\n";
 
-    // //Save results
-    // pso.saveToFile("rastrigin.csv", 100);
+    // // //Save results
+    // pso.saveToFile("rastrigin_parallel.csv");
 
-    // run_python();
+    // run_python("rastrigin_parallel.csv");
 #endif
 
 #ifdef DOD_TEST
-    double fitness = rastrigin({0, 0});
+
     // auto start = std::chrono::high_resolution_clock::now();
-    // run_dod();
+    // pso_serial(100000, 100, 0.5, 1.0, 1.0, {50, 50}, 100, rastrigin);
     // auto end = std::chrono::high_resolution_clock::now();
     // std::chrono::duration<double> elapsed = end - start;
     // std::cout << "Elapsed time serial: " << elapsed.count() << "s\n";
 
     auto start1 = std::chrono::high_resolution_clock::now();
-    run_parallel();
+    pso_parallel(1000000, 100, 0.5, 1.0, 1.0, {50, 50}, 100, rastrigin);
     auto end1 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed1 = end1 - start1;
-    std::cout << "Elapsed time parallel: " << elapsed1.count()<< "s\n";
-    #endif
+    std::cout << "Elapsed time parallel: " << elapsed1.count() << "s\n";
+#endif
 }

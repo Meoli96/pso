@@ -80,21 +80,17 @@ void PSO::initialize(Real2D center, double radius) {
         }
     }
 }
-double PSO::update_parallel(std::span<Particle> particles,
-                            double& thread_best_f) {
+double PSO::update_thread(std::span<Particle> particles, double& thread_best_f,
+                          Real2D& global_best_position) {
     int n_particles = particles.size();
-    double best_f = global_best_value;
+    double best_f = thread_best_f;
 
     for (int i = 0; i < n_particles; ++i) {
         // Update particle
         double f = update(particles[i]);
         if (f < best_f) {
             best_f = f;
-        }
-        if (save) {
-            // Save particle
-            this->particle_buf[i].position = particles[i].position;
-            this->particle_buf[i].f = f;
+            global_best_position = particles[i].best_position;
         }
     }
     thread_best_f = best_f;
@@ -144,20 +140,19 @@ void PSO::optimize(int n_iterations) {
     // Particle[i].position, f(Particle[i].position)
     if (save) {
         // Initialize ParticleSave[n_iterations][n_particles]
-        this->particle_buf =
-            std::make_unique<ParticleSave[]>(n_iterations * n_particles);
+        this->particle_buf = std::vector<std::vector<ParticleSave>>(
+            n_iterations, std::vector<ParticleSave>(n_particles));
     }
     // Iterations
-    for (int i = 0; i < n_iterations; ++i) {
+    for (int it = 0; it < n_iterations; ++it) {
         // Particles
         for (int j = 0; j < n_particles; ++j) {
             // Update particle
             update(particles[j]);
             if (save) {
                 // Save particle
-                this->particle_buf[i * n_particles + j].position =
-                    particles[j].position;
-                this->particle_buf[i * n_particles + j].f =
+                this->particle_buf[it][j].position = particles[j].position;
+                this->particle_buf[it][j].f =
                     objective_function(particles[j].position);
             }
         }
@@ -175,27 +170,31 @@ void PSO::optimize_parallel(int n_iterations) {
     // Particle[i].position, f(Particle[i].position)
     if (save) {
         // Initialize ParticleSave[n_iterations][n_particles]
-        this->particle_buf =
-            std::make_unique<ParticleSave[]>(n_iterations * n_particles);
+        this->particle_buf = std::vector<std::vector<ParticleSave>>(
+            n_iterations, std::vector<ParticleSave>(n_particles));
     }
     // Get spans for threads
     int particles_per_thread = n_particles / N_THREADS;
     int particles_last_thread = n_particles % N_THREADS;
 
     // Initialize thread best global f
-    double thread_best_global_f[N_THREADS];
+    double thread_best_global_f[N_THREADS]{this->global_best_value};
+    Real2D thread_best_position[N_THREADS]{this->global_best_position};
 
     // Initialize threadpool
-    thread::ThreadPool<double(std::span<Particle>, double&)> pool(
-        [this](std::span<Particle> particles, double& thread_best_f) {
-            return this->update_parallel(particles, thread_best_f);
+    thread::ThreadPool<double(std::span<Particle>, double&, Real2D&)> pool(
+        [this](std::span<Particle> particles, double& thread_best_f,
+               Real2D& thread_best_position) {
+            return this->update_thread(particles, thread_best_f,
+                                       thread_best_position);
         });
-    // Iterations
+
+    // Now perform iterations
     for (int i = 0; i < n_iterations; ++i) {
         // Particles
         for (int t = 0; t < N_THREADS; t++) {
-            int start = t * particles_per_thread;
-            int end = (t + 1) * particles_per_thread;
+            size_t start = t * particles_per_thread;
+            size_t end = (t + 1) * particles_per_thread;
             if (t == N_THREADS - 1) {
                 end += particles_last_thread;
             }
@@ -203,31 +202,51 @@ void PSO::optimize_parallel(int n_iterations) {
             std::span t_particles(particles.begin() + start,
                                   particles.begin() + end);
 
-            pool.addjob(t_particles, thread_best_global_f[t]);
+            pool.addjob(t_particles, thread_best_global_f[t],
+                        thread_best_position[t]);
         }
         // Wait for threads to finish
         for (int t = 0; t < N_THREADS; t++) {
             pool.wait();
         }
-        // Update global best for next iteration
-        this->global_best_value = *std::min_element(
-            thread_best_global_f, thread_best_global_f + N_THREADS);
+        // Update global best and position for next iteration
+
+        // Obtain best thread
+        int best_thread = std::min_element(thread_best_global_f,
+                                           thread_best_global_f + N_THREADS) -
+                          thread_best_global_f;
+        this->global_best_value = thread_best_global_f[best_thread];
+        this->global_best_position = thread_best_position[best_thread];
+
+        if (save) {
+            // Save particle
+            for (int j = 0; j < n_particles; ++j) {
+                this->particle_buf[i][j].position = particles[j].position;
+                this->particle_buf[i][j].f =
+                    objective_function(particles[j].position);
+            }
+        }
     }
 }
 
-void PSO::saveToFile(std::string filename, int n_iterations) {
+void PSO::saveToFile(std::string filename) {
+    if (!save) {
+        std::cout << "No data to save\n";
+        return;
+    }
     std::ofstream file(outFolder + filename);
 
     // Write header
     file << this->n_particles << "," << this->w << "," << this->c1 << ","
          << this->c2 << std::endl;
+    int n_iterations = this->particle_buf.size();
 
     // Write data
     for (int i = 0; i < n_iterations; ++i) {
         for (int j = 0; j < n_particles; ++j) {
-            file << this->particle_buf[i * n_particles + j].position[0] << ","
-                 << this->particle_buf[i * n_particles + j].position[1] << ","
-                 << this->particle_buf[i * n_particles + j].f << ",";
+            file << this->particle_buf[i][j].position[0] << ","
+                 << this->particle_buf[i][j].position[1] << ","
+                 << this->particle_buf[i][j].f << ",";
         }
         file << "\n";
     }
@@ -236,10 +255,10 @@ void PSO::saveToFile(std::string filename, int n_iterations) {
     file.close();
 }
 
-void run_python() {
+void run_python(std::string csv_file) {
     // Run python script
-    std::string plotFile = "../out/pso.csv";
+    std::string plot_file = "../out/" + csv_file;
     std::string path = "../scripts/plot.py";
-    std::string command = "python3 " + path + " " + plotFile;
+    std::string command = "python3 " + path + " " + plot_file;
     std::system(command.c_str());
 }
